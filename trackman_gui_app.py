@@ -1,4 +1,3 @@
-import os, sys, builtins, logging
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
 import json
@@ -12,42 +11,7 @@ from openpyxl.utils import get_column_letter
 import trackman_auth
 from trackman_api import download_report, get_latest_report_id_from_chrome
 
-# -----------------------------
-# SAFETY + LOGGING (for .exe)
-# -----------------------------
-def init_safe_logging():
-    if not sys.stdin:
-        sys.stdin = open(os.devnull, "r")
-    if not sys.stdout:
-        sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="ignore")
-    if not sys.stderr:
-        sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="ignore")
-    builtins.input = lambda *a, **kw: ""
 
-    log_dir = Path(os.getenv("LOCALAPPDATA", Path.home())) / "TrackmanConverter" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "app.log"
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.FileHandler(log_file, encoding="utf-8")]
-    )
-    logging.info("=== TrackmanConverter started ===")
-    return log_file
-
-LOG_PATH = init_safe_logging()
-
-# -----------------------------
-# CONSTANTS
-# -----------------------------
-APP_FOOTER_TEXT = "© 2025 TrackMan Converter by Tom McIntyre"
-TRACKMAN_ORANGE = "#FF6600"
-DARK_BG = "#1E1E1E"
-
-# -----------------------------
-# LOADING OVERLAY
-# -----------------------------
 class LoadingOverlay(ctk.CTkToplevel):
     def __init__(self, parent, text="Loading..."):
         super().__init__(parent)
@@ -70,40 +34,64 @@ class LoadingOverlay(ctk.CTkToplevel):
     def update_text(self, text):
         self.label.configure(text=text)
         self.update_idletasks()
+# =========================================
+# Constants
+# =========================================
+APP_FOOTER_TEXT = "© 2025 TrackMan Converter by Tom McIntyre"
+TRACKMAN_ORANGE = "#FF6600"
+DARK_BG = "#1E1E1E"
 
-# -----------------------------
-# EXCEL CONVERSION LOGIC
-# -----------------------------
+HEADER_FILL = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+HEADER_FONT = Font(bold=True, color="FFFFFF")
+ALT_FILL = PatternFill(start_color="E8F0FA", end_color="E8F0FA", fill_type="solid")
+BORDER = Border(left=Side(style="thin"), right=Side(style="thin"),
+                top=Side(style="thin"), bottom=Side(style="thin"))
+
+
 COLUMNS = [
-    "Time", "Club Speed (Mph)", "Ball Speed (Mph)", "Smash Factor",
-    "Carry (Yds)", "Total (Yds)", "Impact Height (mm)", "Impact Offset (mm)",
+    "Time",
+    "Club Speed (Mph)", "Ball Speed (Mph)", "Smash Factor",
+    "Carry (Yds)", "Total (Yds)",
+    "Impact Height (mm)", "Impact Offset (mm)",
     "Club Path (Deg)", "Face Angle (Deg)", "Face To Path (Deg)",
-    "Launch Direction (Deg)", "Attack Angle (Deg)", "Dynamic Loft (Deg)",
-    "Launch Angle (Deg)", "Spin Loft (Deg)", "Spin Rate (Rpm)",
-    "Spin Axis (Deg)", "Curve (Ft)", "Carry Side (Ft)", "Total Side (Ft)",
-    "Max Height (Ft)", "Landing Angle (Deg)", "Swing Direction (Deg)",
-    "Swing Plane (Deg)", "Swing Radius", "DPlane Tilt", "Low Point (In)",
-    "Landing Height", "Hang Time (Sec)", "Dynamic Lie (Deg)"
+    "Launch Direction (Deg)", "Attack Angle (Deg)",
+    "Dynamic Loft (Deg)", "Launch Angle (Deg)", "Spin Loft (Deg)",
+    "Spin Rate (Rpm)", "Spin Axis (Deg)",
+    "Curve (Ft)", "Carry Side (Ft)", "Total Side (Ft)",
+    "Max Height (Ft)", "Landing Angle (Deg)",
+    "Swing Direction (Deg)", "Swing Plane (Deg)", "Swing Radius",
+    "DPlane Tilt", "Low Point (In)", "Landing Height", "Hang Time (Sec)",
+    "Dynamic Lie (Deg)"
 ]
 
-def _fmt_time(iso: str):
-    if not iso: return ""
+
+# =========================================
+# Helpers
+# =========================================
+def _fmt_time(iso: str) -> str:
+    if not iso:
+        return ""
     try:
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except:
+    except Exception:
         return iso
 
-def _conv(v, factor=1):
-    if v is None: return ""
-    try: return f"{float(v) * factor:.2f}"
-    except: return ""
 
-def convert_measurement_to_row(m: dict):
+def _conv(v, factor=1.0) -> str:
+    if v is None:
+        return ""
+    try:
+        return f"{float(v) * factor:.2f}"
+    except Exception:
+        return ""
+
+
+def convert_measurement_to_row(m: dict) -> dict:
     if not m:
         return {k: "" for k in COLUMNS}
     return {
-        "Time": _fmt_time(m.get("Time")),
+        "Time": _fmt_time(m.get("Time", "")),
         "Club Speed (Mph)": _conv(m.get("ClubSpeed"), 2.23694),
         "Ball Speed (Mph)": _conv(m.get("BallSpeed"), 2.23694),
         "Smash Factor": _conv(m.get("SmashFactor")),
@@ -136,36 +124,119 @@ def convert_measurement_to_row(m: dict):
         "Dynamic Lie (Deg)": _conv(m.get("DynamicLie")),
     }
 
-def build_workbook(data: dict):
+
+# =========================================
+# Sheet Styling + Stats
+# =========================================
+def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
+    # Header
+    for c in range(1, n_cols + 1):
+        cell = ws.cell(row=header_row_idx, column=c)
+        cell.font = Font(bold=True, color="000000")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = Border(bottom=Side(style="thin", color="888888"))
+
+    # Alternating fill
+    data_start = header_row_idx + 1
+    data_end = header_row_idx + n_rows
+    for r in range(data_start, data_end + 1):
+        fill = ALT_FILL if (r - data_start) % 2 == 0 else None
+        for c in range(1, n_cols + 1):
+            if fill:
+                ws.cell(row=r, column=c).fill = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
+
+    ws.freeze_panes = f"A{header_row_idx + 1}"
+    last_col_letter = get_column_letter(n_cols)
+    ws.auto_filter.ref = f"A{header_row_idx}:{last_col_letter}{data_end}"
+
+
+def add_summary_rows(ws, df: pd.DataFrame):
+    """Adds Pos/Neg/Av/Spread/% rows based on dynamic filters"""
+    if df.empty:
+        return
+
+    def meets_filter(row):
+        try:
+            return (
+                float(row["Smash Factor"]) >= 1.45 and
+                abs(float(row["Impact Height (mm)"])) <= 10 and
+                abs(float(row["Impact Offset (mm)"])) <= 10 and
+                abs(float(row["Club Path (Deg)"])) <= 4 and
+                abs(float(row["Face Angle (Deg)"])) <= 2
+            )
+        except Exception:
+            return False
+
+    df_numeric = df.apply(pd.to_numeric, errors="ignore")
+    pos_df = df_numeric[df_numeric.apply(meets_filter, axis=1)]
+    neg_df = df_numeric[~df_numeric.apply(meets_filter, axis=1)]
+
+    rows_to_add = {
+        "Pos Av": pos_df.mean(numeric_only=True),
+        "Neg Av": neg_df.mean(numeric_only=True),
+        "Av": df_numeric.mean(numeric_only=True),
+        "Spread": df_numeric.max(numeric_only=True) - df_numeric.min(numeric_only=True),
+        "% Pos": (len(pos_df) / len(df_numeric) * 100) if len(df_numeric) else 0,
+        "% Neg": (len(neg_df) / len(df_numeric) * 100) if len(df_numeric) else 0,
+    }
+
+    start_row = ws.max_row + 2
+    for label, vals in rows_to_add.items():
+        ws.cell(row=start_row, column=1, value=label)
+        ws.cell(row=start_row, column=1).font = Font(bold=True)
+        if isinstance(vals, pd.Series):
+            for i, v in enumerate(vals.tolist(), start=2):
+                if isinstance(v, (int, float)):
+                    ws.cell(row=start_row, column=i, value=round(v, 2))
+        elif isinstance(vals, (int, float)):
+            ws.cell(row=start_row, column=2, value=round(vals, 2))
+        start_row += 1
+
+
+# =========================================
+# Workbook Build
+# =========================================
+def build_workbook_per_club(data: dict) -> Workbook:
     wb = Workbook()
     wb.remove(wb.active)
-    groups = data.get("StrokeGroups", []) or []
-    all_rows = []
+    stroke_groups = data.get("StrokeGroups", []) or []
 
-    for g in groups:
-        club = str(g.get("Club", "Unknown Club"))[:31]
-        ws = wb.create_sheet(title=club)
-        rows = [convert_measurement_to_row(s.get("Measurement", {})) for s in g.get("Strokes", [])]
+    for g in stroke_groups:
+        club = str(g.get("Club", "Unknown Club"))
+        ws = wb.create_sheet(title=club[:31])
+        rows = [convert_measurement_to_row(s.get("Measurement")) for s in g.get("Strokes", []) if s.get("Measurement")]
+        if not rows:
+            continue
+
         df = pd.DataFrame(rows, columns=COLUMNS)
         for r in dataframe_to_rows(df, index=False, header=True):
             ws.append(r)
-        all_rows.extend(rows)
-        ws.freeze_panes = "A2"
 
+        style_and_finalize_sheet(ws, 1, len(COLUMNS), len(df.index))
+        add_summary_rows(ws, df)
+
+    # All Data (unchanged)
+    all_rows = [convert_measurement_to_row(s.get("Measurement"))
+                for g in stroke_groups for s in g.get("Strokes", []) if s.get("Measurement")]
     if all_rows:
         ws_all = wb.create_sheet("All Data")
-        df = pd.DataFrame(all_rows, columns=COLUMNS)
-        for r in dataframe_to_rows(df, index=False, header=True):
+        df_all = pd.DataFrame(all_rows, columns=COLUMNS)
+        for r in dataframe_to_rows(df_all, index=False, header=True):
             ws_all.append(r)
+        style_and_finalize_sheet(ws_all, 1, len(COLUMNS), len(df_all.index))
 
     return wb
 
+
+# =========================================
+# JSON → Excel Conversion
+# =========================================
 def convert_json_to_excel(json_path: str) -> Path:
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    wb = build_workbook(data)
+    wb = build_workbook_per_club(data)
 
-    default_name = f"Trackman_Report_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    default_name = f"Trackman_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     save_path = filedialog.asksaveasfilename(
         title="Save Converted Excel File",
         defaultextension=".xlsx",
@@ -173,24 +244,23 @@ def convert_json_to_excel(json_path: str) -> Path:
         initialdir=str(Path.home() / "Documents"),
         filetypes=[("Excel Files", "*.xlsx")],
     )
+
     if not save_path:
-        messagebox.showinfo("Cancelled", "Save cancelled.")
+        messagebox.showinfo("Cancelled", "Save cancelled. File not created.")
         return None
 
     wb.save(save_path)
     return save_path
 
-# -----------------------------
-# MODERN GUI
-# -----------------------------
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("dark-blue")
 
+# =========================================
+# GUI
+# =========================================
 class TrackmanApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("TrackMan Converter")
-        self.geometry("700x500")
+        self.geometry("700x480")
         self.resizable(False, False)
         self.configure(fg_color=DARK_BG)
         self.overlay = None
@@ -199,7 +269,8 @@ class TrackmanApp(ctk.CTk):
         header = ctk.CTkFrame(self, fg_color=TRACKMAN_ORANGE, corner_radius=0, height=90)
         header.pack(fill="x")
 
-        title = ctk.CTkLabel(header, text="TrackMan Report Converter", font=("Segoe UI", 28, "bold"), text_color="white")
+        title = ctk.CTkLabel(header, text="TrackMan Report Converter",
+                             font=("Segoe UI", 28, "bold"), text_color="white")
         title.pack(pady=25)
 
         # Content
@@ -207,37 +278,26 @@ class TrackmanApp(ctk.CTk):
         content.pack(expand=True, fill="both")
 
         desc = ctk.CTkLabel(content,
-            text="Automatically fetches your latest TrackMan report\nand converts it to a formatted Excel file.",
-            font=("Segoe UI", 16), text_color="#BBBBBB", justify="center"
-        )
+                            text="Automatically fetches your latest TrackMan report\nand converts it to a formatted Excel file.",
+                            font=("Segoe UI", 16), text_color="#BBBBBB", justify="center")
         desc.pack(pady=(60, 30))
 
-        # Buttons
-        self.convert_btn = ctk.CTkButton(
-            content, text="Download & Convert Latest Report",
-            width=320, height=60, corner_radius=12,
-            font=("Segoe UI", 18, "bold"),
-            fg_color=TRACKMAN_ORANGE, hover_color="#FF8533",
-            text_color="white", command=self.handle_cloud
-        )
+        self.convert_btn = ctk.CTkButton(content,
+                                         text="☁️  Download & Convert Latest Report",
+                                         width=320, height=60, corner_radius=12,
+                                         font=("Segoe UI", 18, "bold"),
+                                         fg_color=TRACKMAN_ORANGE, hover_color="#FF8533",
+                                         text_color="white", command=self.handle_cloud)
         self.convert_btn.pack(pady=10)
-
-        self.token_btn = ctk.CTkButton(
-            content, text="🔑 Paste TrackMan Token Manually",
-            width=320, height=40, corner_radius=10,
-            font=("Segoe UI", 15),
-            fg_color="#444444", hover_color="#666666",
-            text_color="white", command=self.manual_token_entry
-        )
-        self.token_btn.pack(pady=8)
 
         self.status_label = ctk.CTkLabel(content, text="", font=("Segoe UI", 14), text_color="#AAAAAA")
         self.status_label.pack(pady=(30, 10))
 
-        footer = ctk.CTkLabel(self, text=APP_FOOTER_TEXT, font=("Segoe UI", 11, "italic"), text_color="#666666")
+        footer = ctk.CTkLabel(self, text=APP_FOOTER_TEXT,
+                              font=("Segoe UI", 11, "italic"), text_color="#666666")
         footer.pack(side="bottom", pady=8)
 
-    # Overlay methods
+    # -----------------------------
     def show_overlay(self, text="Loading..."):
         if self.overlay:
             self.overlay.destroy()
@@ -249,53 +309,33 @@ class TrackmanApp(ctk.CTk):
             self.overlay.destroy()
             self.overlay = None
 
-    # Manual token entry
-    def manual_token_entry(self):
-        import tkinter.simpledialog as sd
-        token_input = sd.askstring("Enter TrackMan Token", "Paste your TrackMan Bearer token below:")
-        if not token_input:
-            messagebox.showinfo("Cancelled", "No token entered.")
-            return
-
-        token_clean = token_input.strip()
-        if token_clean.lower().startswith("bearer "):
-            token_clean = token_clean.split(" ", 1)[1].strip()
-
-        try:
-            with open("trackman_token.txt", "w", encoding="utf-8") as f:
-                f.write(token_clean)
-            messagebox.showinfo("Success", "✅ Token saved successfully!\nYou can now download reports.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save token:\n{e}")
-
-    # Download + Convert handler
+    # -----------------------------
     def handle_cloud(self):
         try:
-            self.show_overlay("Checking TrackMan login...")
+            self.show_overlay("🔐 Checking TrackMan login...")
             token = trackman_auth.get_saved_token() or trackman_auth.login_via_browser()
             if not token:
                 raise Exception("Could not retrieve TrackMan token.")
 
-            self.overlay.update_text("Detecting latest TrackMan report in Chrome...")
+            self.overlay.update_text("🔍 Detecting latest TrackMan report in Chrome...")
             report_id = get_latest_report_id_from_chrome()
             if not report_id:
                 raise Exception("Couldn't find any recent TrackMan report in Chrome. Open one in your browser first.")
 
-            self.overlay.update_text("Downloading report data...")
+            self.overlay.update_text("📡 Downloading report data...")
             json_path = download_report(token, report_id)
 
-            self.overlay.update_text("Converting to formatted Excel...")
+            self.overlay.update_text("📊 Converting to formatted Excel...")
             result = convert_json_to_excel(json_path)
 
             self.hide_overlay()
-            messagebox.showinfo("Success", f"Downloaded and converted!\nSaved as:\n{result}")
+            messagebox.showinfo("Success", f"✅ Downloaded and converted!\nSaved as:\n{result}")
+
         except Exception as e:
             self.hide_overlay()
             messagebox.showerror("Error", str(e))
 
-# -----------------------------
-# RUN APP
-# -----------------------------
+
 if __name__ == "__main__":
     app = TrackmanApp()
     app.mainloop()
