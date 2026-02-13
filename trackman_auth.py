@@ -4,7 +4,12 @@ import json
 import shutil
 from pathlib import Path
 
-TOKEN_FILE = "trackman_token.txt"
+import sys
+
+
+BASE_DIR = Path(getattr(sys, '_MEIPASS', Path(__file__).parent))
+TOKEN_FILE = Path(sys.executable).parent / "trackman_token.txt" if getattr(sys, 'frozen', False) else BASE_DIR / "trackman_token.txt"
+
 
 def get_saved_token():
     """Return saved token if it exists"""
@@ -38,7 +43,7 @@ def extract_token_from_chrome():
     tmp_copy = Path("chrome_cookies_copy.db")
 
     try:
-        # Copy cookie DB so we don't lock the original file
+
         with open(cookie_db_path, "rb") as src, open(tmp_copy, "wb") as dst:
             dst.write(src.read())
     except PermissionError:
