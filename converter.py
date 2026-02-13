@@ -250,7 +250,7 @@ def build_workbook_per_club(data: dict) -> Workbook:
 
         df = pd.DataFrame(rows, columns=COLUMNS)
         for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="ignore")
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
         for r in dataframe_to_rows(df, index=False, header=True):
             ws.append(r)
@@ -264,7 +264,7 @@ def build_workbook_per_club(data: dict) -> Workbook:
         ws_all = wb.create_sheet("All Data")
         df_all = pd.DataFrame(all_rows)
         for col in df_all.columns:
-            df_all[col] = pd.to_numeric(df_all[col], errors="ignore")
+            df_all[col] = pd.to_numeric(df_all[col], errors="coerce")
 
         for r in dataframe_to_rows(df_all, index=False, header=True):
             ws_all.append(r)
