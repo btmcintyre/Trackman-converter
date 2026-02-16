@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 TRACKMAN_API_URL = "https://golf-player-activities.trackmangolf.com/api/reports/getreport"
@@ -182,3 +183,33 @@ def fetch_report_metadata(token: str, report_id: str) -> dict | None:
         }
     except Exception:
         return None
+
+
+def fetch_report_metadata_batch(token: str, report_ids: list, max_workers: int = 20) -> list:
+    """
+    Fetch metadata for multiple reports in parallel.
+    
+    Args:
+        token: Authorization bearer token
+        report_ids: List of report IDs to fetch
+        max_workers: Number of concurrent requests (default 5, TrackMan API friendly)
+    
+    Returns:
+        List of metadata dicts with same length as input, None entries for failed requests
+    """
+    def fetch_single(report_id):
+        return fetch_report_metadata(token, report_id)
+    
+    results = [None] * len(report_ids)
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {executor.submit(fetch_single, rid): idx for idx, rid in enumerate(report_ids)}
+        
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
+            try:
+                results[idx] = future.result()
+            except Exception:
+                results[idx] = None
+    
+    return results

@@ -158,7 +158,7 @@ class TrackmanApp(ctk.CTk):
 
     def handle_cloud(self):
         try:
-            from trackman_api import get_all_report_ids_from_chrome, fetch_report_metadata
+            from trackman_api import get_all_report_ids_from_chrome, fetch_report_metadata_batch
 
             self.show_overlay(" Checking TrackMan login...")
             token = trackman_auth.get_saved_token() or trackman_auth.login_via_browser()
@@ -186,9 +186,11 @@ class TrackmanApp(ctk.CTk):
                     unique_reports.append(r)
 
             self.overlay.update_text("Getting upload dates from TrackMan...")
+            report_ids = [r["id"] for r in unique_reports]
+            metadata_list = fetch_report_metadata_batch(token, report_ids, max_workers=5)
+            
             enriched = []
-            for r in unique_reports:
-                meta = fetch_report_metadata(token, r["id"])
+            for r, meta in zip(unique_reports, metadata_list):
                 if meta and meta.get("created"):
                     try:
                         meta["time"] = datetime.fromisoformat(meta["created"].replace("Z", "+00:00"))
