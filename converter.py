@@ -38,7 +38,7 @@ def _fmt_time(iso: str) -> str:
         return iso
 
 
-def _conv(v, factor=1.0):
+def _conv_2decimal(v, factor=1.0):
     """Return real numbers (not strings) so Excel sees them as numeric."""
     if v is None:
         return ""
@@ -46,43 +46,60 @@ def _conv(v, factor=1.0):
         return round(float(v) * factor, 2)
     except Exception:
         return ""
+    
+def _conv_1decimal(v, factor=1.0):
+    """Return real numbers (not strings) so Excel sees them as numeric."""
+    if v is None:
+        return ""
+    try:
+        return round(float(v) * factor, 1)
+    except Exception:
+        return ""
 
+def _conv_0decimal(v, factor=1.0):
+    """Return real numbers (not strings) so Excel sees them as numeric."""
+    if v is None:
+        return ""
+    try:
+        return round(float(v) * factor, 0)
+    except Exception:
+        return ""
 
 def convert_measurement_to_row(m: dict) -> dict:
     if not m:
         return {k: "" for k in COLUMNS}
     return {
         "Time": _fmt_time(m.get("Time", "")),
-        "Club Speed (Mph)": _conv(m.get("ClubSpeed"), 2.23694),
-        "Ball Speed (Mph)": _conv(m.get("BallSpeed"), 2.23694),
-        "Smash Factor": _conv(m.get("SmashFactor")),
-        "Carry (Yds)": _conv(m.get("Carry"), 1.09361),
-        "Total (Yds)": _conv(m.get("Total"), 1.09361),
-        "Impact Height (mm)": _conv(m.get("ImpactHeight"), 1000),
-        "Impact Offset (mm)": _conv(m.get("ImpactOffset"), 1000),
-        "Club Path (Deg)": _conv(m.get("ClubPath")),
-        "Face Angle (Deg)": _conv(m.get("FaceAngle")),
-        "Face To Path (Deg)": _conv(m.get("FaceToPath")),
-        "Launch Direction (Deg)": _conv(m.get("LaunchDirection")),
-        "Attack Angle (Deg)": _conv(m.get("AttackAngle")),
-        "Dynamic Loft (Deg)": _conv(m.get("DynamicLoft")),
-        "Launch Angle (Deg)": _conv(m.get("LaunchAngle")),
-        "Spin Loft (Deg)": _conv(m.get("SpinLoft")),
-        "Spin Rate (Rpm)": _conv(m.get("SpinRate")),
-        "Spin Axis (Deg)": _conv(m.get("SpinAxis")),
-        "Curve (Ft)": _conv(m.get("Curve"), 3.28084),
-        "Carry Side (Ft)": _conv(m.get("CarrySide"), 3.28084),
-        "Total Side (Ft)": _conv(m.get("TotalSide"), 3.28084),
-        "Max Height (Ft)": _conv(m.get("MaxHeight"), 3.28084),
-        "Landing Angle (Deg)": _conv(m.get("LandingAngle")),
-        "Swing Direction (Deg)": _conv(m.get("SwingDirection")),
-        "Swing Plane (Deg)": _conv(m.get("SwingPlane")),
-        "Swing Radius": _conv(m.get("SwingRadius")),
-        "DPlane Tilt": _conv(m.get("DPlaneTilt")),
-        "Low Point (In)": _conv(m.get("LowPointDistance"), 39.3701),
-        "Landing Height": _conv(m.get("LandingHeight")),
-        "Hang Time (Sec)": _conv(m.get("HangTime")),
-        "Dynamic Lie (Deg)": _conv(m.get("DynamicLie")),
+        "Club Speed (Mph)": _conv_2decimal(m.get("ClubSpeed"), 2.23694),
+        "Ball Speed (Mph)": _conv_2decimal(m.get("BallSpeed"), 2.23694),
+        "Smash Factor": _conv_2decimal(m.get("SmashFactor")),
+        "Carry (Yds)": _conv_2decimal(m.get("Carry"), 1.09361),
+        "Total (Yds)": _conv_2decimal(m.get("Total"), 1.09361),
+        "Impact Height (mm)": _conv_2decimal(m.get("ImpactHeight"), 1000),
+        "Impact Offset (mm)": _conv_2decimal(m.get("ImpactOffset"), 1000),
+        "Club Path (Deg)": _conv_2decimal(m.get("ClubPath")),
+        "Face Angle (Deg)": _conv_2decimal(m.get("FaceAngle")),
+        "Face To Path (Deg)": _conv_2decimal(m.get("FaceToPath")),
+        "Launch Direction (Deg)": _conv_2decimal(m.get("LaunchDirection")),
+        "Attack Angle (Deg)": _conv_2decimal(m.get("AttackAngle")),
+        "Dynamic Loft (Deg)": _conv_2decimal(m.get("DynamicLoft")),
+        "Launch Angle (Deg)": _conv_2decimal(m.get("LaunchAngle")),
+        "Spin Loft (Deg)": _conv_2decimal(m.get("SpinLoft")),
+        "Spin Rate (Rpm)": _conv_2decimal(m.get("SpinRate")),
+        "Spin Axis (Deg)": _conv_2decimal(m.get("SpinAxis")),
+        "Curve (Ft)": _conv_2decimal(m.get("Curve"), 3.28084),
+        "Carry Side (Ft)": _conv_2decimal(m.get("CarrySide"), 3.28084),
+        "Total Side (Ft)": _conv_2decimal(m.get("TotalSide"), 3.28084),
+        "Max Height (Ft)": _conv_2decimal(m.get("MaxHeight"), 3.28084),
+        "Landing Angle (Deg)": _conv_2decimal(m.get("LandingAngle")),
+        "Swing Direction (Deg)": _conv_2decimal(m.get("SwingDirection")),
+        "Swing Plane (Deg)": _conv_2decimal(m.get("SwingPlane")),
+        "Swing Radius": _conv_2decimal(m.get("SwingRadius")),
+        "DPlane Tilt": _conv_2decimal(m.get("DPlaneTilt")),
+        "Low Point (In)": _conv_2decimal(m.get("LowPointDistance"), 39.3701),
+        "Landing Height": _conv_2decimal(m.get("LandingHeight")),
+        "Hang Time (Sec)": _conv_2decimal(m.get("HangTime")),
+        "Dynamic Lie (Deg)": _conv_2decimal(m.get("DynamicLie")),
     }
 
 
@@ -111,7 +128,12 @@ def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
                     pass
 
             if isinstance(val, (int, float)):
-                cell.number_format = "0.00"
+                if cell.column == 4:  # Smash Factor
+                    cell.number_format = "0.00"
+                elif cell.column == 13: 
+                    cell.number_format = "0.0"
+                else:
+                     cell.number_format = "0"
                 cell.alignment = Alignment(horizontal="right", vertical="center")
             else:
                 cell.alignment = Alignment(horizontal="left", vertical="center")
@@ -158,7 +180,12 @@ def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="right", vertical="center")
             if i < 4:
-                cell.number_format = "0.00"
+                if cell.column == 4:
+                    cell.number_format = "0.00"
+                elif cell.column == 13: 
+                    cell.number_format = "0.0"
+                else:
+                     cell.number_format = "0"
             else:
                 cell.number_format = "0%"
 
@@ -202,7 +229,13 @@ def append_best_swings(ws, df: pd.DataFrame):
             val = row.get(col_name, "")
             cell = ws.cell(row=start_row, column=col_idx, value=val)
             if isinstance(val, (int, float)):
-                cell.number_format = "0.00"
+                if cell.column == 4:
+                    cell.number_format = "0.00"
+                elif cell.column == 13: 
+                    cell.number_format = "0.0"
+                else:
+                     cell.number_format = "0"
+                
                 cell.alignment = Alignment(horizontal="right", vertical="center")
             else:
                 cell.alignment = Alignment(horizontal="left", vertical="center")
