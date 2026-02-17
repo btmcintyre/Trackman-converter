@@ -42,7 +42,7 @@ class LoadingOverlay(ctk.CTkToplevel):
 
 
 
-APP_FOOTER_TEXT = "© 2025 TrackMan Converter by Tom McIntyre"
+APP_FOOTER_TEXT = "© 2026 TrackMan Converter by Tom McIntyre and Brian McIntyre. All rights reserved."
 TRACKMAN_COLOUR = "#001AFF"
 DARK_BG = "#1E1E1E"
 
@@ -203,7 +203,7 @@ class TrackmanApp(ctk.CTk):
             reports = enriched
             self.hide_overlay()
 
-
+            #show_selector(reports, token, self)
             selector = ctk.CTkToplevel(self)
             selector.title("Select TrackMan Report")
             selector.geometry("720x560")
@@ -224,22 +224,7 @@ class TrackmanApp(ctk.CTk):
             container = ctk.CTkFrame(scroll_area, fg_color="#1E1E1E")
             container.pack(anchor="center")
 
-            def on_select(report):
-                selector.destroy()
-                self.show_overlay("Downloading selected report...")
-                try:
-                    json_path = download_report(token, report["id"])
-                    self.overlay.update_text(" Converting to formatted Excel...")
-                    out_dir = Path(r"C:\Trackman\Data")  # or Path.home() / "Documents"
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    default_name = f"{report['time'].strftime('%Y_%m_%d')}.xlsx"
-                    out_path = out_dir / default_name
-                    result = convert_json_to_excel(json_path, str(out_path))
-                    self.hide_overlay()
-                    messagebox.showinfo("Success", f" Downloaded and converted!\nSaved as:\n{result}")
-                except Exception as e:
-                    self.hide_overlay()
-                    messagebox.showerror("Error", str(e))
+            
 
           
             reports.sort(key=lambda r: r["time"], reverse=True)
@@ -299,11 +284,44 @@ class TrackmanApp(ctk.CTk):
                     command=lambda rep=r: on_select(rep),
                 ).pack(pady=(5, 10))
 
+
+                def on_select(report):
+                    selector.destroy()
+                    self.show_overlay("Downloading selected report...")
+                    try:
+                        json_path = download_report(token, report["id"])
+                        self.overlay.update_text(" Converting to formatted Excel...")
+                        out_dir = Path(r"C:\Trackman\Data")  # or Path.home() / "Documents"
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        default_name = f"{report['time'].strftime('%Y_%m_%d')}.xlsx"
+                        out_path = out_dir / default_name
+                        result = convert_json_to_excel(json_path, str(out_path))
+                        self.hide_overlay()
+                        messagebox.showinfo("Success", f" Downloaded and converted!\nSaved as:\n{result}")
+                    except Exception as e:
+                        self.hide_overlay()
+                        messagebox.showerror("Error", str(e))
+
         except Exception as e:
             self.hide_overlay()
             messagebox.showerror("Error", str(e))
 
-
+        def on_select(report):
+            selector.destroy()
+            self.show_overlay("Downloading selected report...")
+            try:
+                json_path = download_report(token, report["id"])
+                self.overlay.update_text(" Converting to formatted Excel...")
+                out_dir = Path(r"C:\Trackman\Data")  # or Path.home() / "Documents"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                default_name = f"{report['time'].strftime('%Y_%m_%d')}.xlsx"
+                out_path = out_dir / default_name
+                result = convert_json_to_excel(json_path, str(out_path))
+                self.hide_overlay()
+                messagebox.showinfo("Success", f" Downloaded and converted!\nSaved as:\n{result}")
+            except Exception as e:
+                self.hide_overlay()
+                messagebox.showerror("Error", str(e))
 
 if __name__ == "__main__":
     app = TrackmanApp()
