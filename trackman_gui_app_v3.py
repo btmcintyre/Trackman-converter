@@ -20,7 +20,8 @@ from openpyxl.utils import get_column_letter
 
 # Project-specific modules
 import trackman_auth
-from trackman_api import download_report, get_latest_report_id_from_chrome
+import trackman_api
+from trackman_api import download_report, get_latest_report_id_from_chrome, fetch_report_clubs
 from converter import build_workbook_per_club
 
 # Application-wide constants and theme configuration
@@ -118,6 +119,10 @@ class TrackmanApp(ctk.CTk):
         # show spinner text on the right side of the header so it's always visible
         self.spinner_label.pack(side="right", padx=12, pady=4)
 
+        # Clear clubs cache button (moved to left side of header)
+        clear_btn = ctk.CTkButton(header, text="Clear Clubs Cache", width=140, height=26, fg_color="#FFFFFF", text_color="black", hover_color="#EEEEEE", command=self.clear_clubs_cache)
+        clear_btn.pack(side="left", padx=(12, 6), pady=6)
+
         # Create main content container that will hold different views
         self.main_content = ctk.CTkFrame(self, fg_color=DARK_BG)
         self.main_content.pack(expand=True, fill="both", padx=0, pady=0)
@@ -134,7 +139,7 @@ class TrackmanApp(ctk.CTk):
         self.update_idletasks()
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        window_width = 600
+        window_width = 800
         window_height = 900
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
@@ -169,16 +174,17 @@ class TrackmanApp(ctk.CTk):
         # Sort reports by date (newest first)
         reports.sort(key=lambda r: r["time"], reverse=True)
 
-        # Configure container as a simple rows table: Date | Report | Year | Action
+        # Configure container as a simple rows table: Date | Report | Clubs | Action
         container.grid_columnconfigure(0, weight=0)
         container.grid_columnconfigure(1, weight=1)
-        container.grid_columnconfigure(2, weight=0)
+        container.grid_columnconfigure(2, weight=1)
         container.grid_columnconfigure(3, weight=0)
 
         # Header row
-        ctk.CTkLabel(container, text="Date", font=("Segoe UI", 14, "bold"), text_color="black").grid(row=0, column=0, padx=8, pady=4, sticky="w")
-        ctk.CTkLabel(container, text="Report", font=("Segoe UI", 14, "bold"), text_color="black").grid(row=0, column=1, padx=8, pady=4, sticky="w")
-        ctk.CTkLabel(container, text="Action", font=("Segoe UI", 14, "bold"), text_color="black").grid(row=0, column=3, padx=8, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Date", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=0, column=0, padx=28, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Report", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=0, column=1, padx=28, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Clubs", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=0, column=2, padx=48, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Action", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=0, column=3, padx=28, pady=4, sticky="w")
 
         # Rows
         for i, r in enumerate(reports, start=1):
@@ -193,9 +199,25 @@ class TrackmanApp(ctk.CTk):
             # Report description cell
             ctk.CTkLabel(container, text="Multi Group Report", font=("Segoe UI", 12), text_color="#333333").grid(row=i, column=1, padx=8, pady=6, sticky="w")
 
+            # Clubs placeholder (will be filled asynchronously)
+            clubs_lbl = ctk.CTkLabel(container, text="Loading...", font=("Segoe UI", 11), text_color="#333333")
+            clubs_lbl.grid(row=i, column=2, padx=8, pady=6, sticky="w")
+
             # Action button
             btn = ctk.CTkButton(container, text="Select", fg_color=TRACKMAN_COLOUR, hover_color="#FF8533", text_color="white", width=90, height=28, font=("Segoe UI", 11, "bold"), command=lambda rep=r: self.on_report_selected(rep))
             btn.grid(row=i, column=3, padx=8, pady=4)
+
+            # Start background thread to fetch clubs for this report (uses cache)
+            def fetch_and_update(rep_id, label):
+                try:
+                    clubs = fetch_report_clubs(self.token, rep_id)
+                    text = ", ".join(clubs) if clubs else "—"
+                except Exception:
+                    text = "—"
+                # schedule UI update on main thread
+                self.after(0, lambda: label.configure(text=text))
+
+            threading.Thread(target=fetch_and_update, args=(r["id"], clubs_lbl), daemon=True).start()
 
 
     def on_report_selected(self, report):
@@ -242,6 +264,19 @@ class TrackmanApp(ctk.CTk):
         # Clear all widgets from main_content
         for widget in self.main_content.winfo_children():
             widget.destroy()
+
+
+    def clear_clubs_cache(self):
+        """Clear the persisted and in-memory clubs cache via trackman_api."""
+        try:
+            trackman_api.clear_clubs_cache()
+            messagebox.showinfo("Cache Cleared", "Clubs cache cleared.")
+            # Show a brief overlay while we refresh club data
+            self.show_overlay(" Refreshing club data...")
+            # Refresh the report list so clubs are re-fetched (fresh cache)
+            self.after(100, lambda: self.handle_cloud(fetch_metadata=True))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to clear clubs cache:\n{e}")
 
 
     def show_overlay(self, text="Loading..."):
