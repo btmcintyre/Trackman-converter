@@ -130,7 +130,7 @@ def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
             if isinstance(val, (int, float)):
                 if cell.column == 4:  # Smash Factor
                     cell.number_format = "0.00"
-                elif cell.column == 13: 
+                elif cell.column == 13 or cell.column == 28: 
                     cell.number_format = "0.0"
                 else:
                      cell.number_format = "0"
@@ -182,7 +182,7 @@ def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
             if i < 4:
                 if cell.column == 4:
                     cell.number_format = "0.00"
-                elif cell.column == 13: 
+                elif cell.column == 13 or cell.column == 28: 
                     cell.number_format = "0.0"
                 else:
                      cell.number_format = "0"
@@ -231,7 +231,7 @@ def append_best_swings(ws, df: pd.DataFrame):
             if isinstance(val, (int, float)):
                 if cell.column == 4:
                     cell.number_format = "0.00"
-                elif cell.column == 13: 
+                elif cell.column == 13 or cell.column == 28: 
                     cell.number_format = "0.0"
                 else:
                      cell.number_format = "0"

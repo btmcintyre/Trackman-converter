@@ -120,7 +120,7 @@ class TrackmanApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("TrackMan Converter")
-        self.geometry("700x600")
+        self.geometry("1000x1000")
         self.resizable(False, False)
         self.configure(fg_color=DARK_BG)
         self.overlay = None  # Loading overlay reference
@@ -149,6 +149,16 @@ class TrackmanApp(ctk.CTk):
             text_color="#666666",
         ).pack(side="bottom", pady=8)
 
+        # Center the window on screen
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 1000
+        window_height = 1000
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
         # Automatically start the report discovery process
         self.after(100, self.handle_cloud)
 
@@ -172,23 +182,23 @@ class TrackmanApp(ctk.CTk):
         title_label = ctk.CTkLabel(
             selector_container,
             text="Select a TrackMan Report",
-            font=("Segoe UI", 20, "bold"),
+            font=("Segoe UI", 24, "bold"),
             text_color="white",
         )
-        title_label.pack(pady=(15, 10))
+        title_label.pack(pady=(20, 20))
 
         # Create scrollable area to accommodate many reports
         scroll_area = ctk.CTkScrollableFrame(selector_container, fg_color="#1E1E1E")
-        scroll_area.pack(fill="both", expand=True, padx=20, pady=10)
+        scroll_area.pack(fill="both", expand=True, padx=40, pady=20)
 
         container = ctk.CTkFrame(scroll_area, fg_color="#1E1E1E")
-        container.pack(anchor="center")
+        container.pack(anchor="center", expand=True)
 
         # Sort reports by date (newest first)
         reports.sort(key=lambda r: r["time"], reverse=True)
         
-        # Display reports in a grid layout (3 columns)
-        cols = 3
+        # Display reports in a grid layout (6 columns)
+        cols = 6
         for i, r in enumerate(reports):
             date = r["time"]
             month = date.strftime("%b").upper()
@@ -199,28 +209,28 @@ class TrackmanApp(ctk.CTk):
             frame = ctk.CTkFrame(
                 container,
                 fg_color="#2A2A2A",
-                corner_radius=12,
+                corner_radius=10,
                 border_color="#444",
                 border_width=1,
                 width=180,
-                height=160,
+                height=150,
             )
-            frame.grid(row=i // cols, column=i % cols, padx=18, pady=18)
+            frame.grid(row=i // cols, column=i % cols, padx=15, pady=15)
             
             # Display date in a prominent way
             ctk.CTkLabel(
                 frame,
                 text=f"{month}\n{day}",
-                font=("Segoe UI", 20, "bold"),
-                text_color=TRACKMAN_COLOUR,
+                font=("Segoe UI", 22, "bold"),
+                text_color="white",
                 justify="center",
-            ).pack(pady=(10, 4))
+            ).pack(pady=(10, 5))
 
             # Label the report type
             ctk.CTkLabel(
                 frame,
                 text="Multi Group Report",
-                font=("Segoe UI", 13),
+                font=("Segoe UI", 12),
                 text_color="white",
             ).pack()
 
@@ -230,7 +240,7 @@ class TrackmanApp(ctk.CTk):
                 text=year,
                 font=("Segoe UI", 11, "italic"),
                 text_color="#AAAAAA",
-            ).pack(pady=(0, 8))
+            ).pack(pady=(3, 10))
 
             # Select button for this report
             ctk.CTkButton(
@@ -239,12 +249,12 @@ class TrackmanApp(ctk.CTk):
                 fg_color=TRACKMAN_COLOUR,
                 hover_color="#FF8533",
                 text_color="white",
-                corner_radius=8,
+                corner_radius=6,
                 height=28,
-                width=100,
-                font=("Segoe UI", 13, "bold"),
+                width=90,
+                font=("Segoe UI", 11, "bold"),
                 command=lambda rep=r: self.on_report_selected(rep),
-            ).pack(pady=(5, 10))
+            ).pack(pady=(0, 8))
 
 
     def on_report_selected(self, report):
