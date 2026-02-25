@@ -7,10 +7,37 @@ from tkinter import messagebox, filedialog
 
 # Data handling
 import json
+import logging
+import os
+import sys
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
 import threading
+
+# Set up file logging so errors are visible even in console=False frozen builds
+_LOG_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "TrackmanConverter"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    filename=str(_LOG_DIR / "trackman.log"),
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger(__name__)
+log.info("TrackmanConverter starting up")
+
+# In a frozen PyInstaller build the certifi CA bundle is extracted alongside
+# the exe. Point requests and aiohttp at it via env vars so HTTPS works.
+if getattr(sys, 'frozen', False):
+    # In a one-dir build, bundled datas land next to the exe (sys.executable parent)
+    _ca = os.path.join(os.path.dirname(sys.executable), 'certifi', 'cacert.pem')
+    if not os.path.exists(_ca):
+        # Fallback: one-file build extracts to sys._MEIPASS
+        _ca = os.path.join(getattr(sys, '_MEIPASS', ''), 'certifi', 'cacert.pem')
+    os.environ.setdefault('SSL_CERT_FILE', _ca)
+    os.environ.setdefault('REQUESTS_CA_BUNDLE', _ca)
+    log.info(f"SSL_CERT_FILE set to: {_ca} (exists={os.path.exists(_ca)})")
 
 # Excel workbook creation and formatting
 from openpyxl import Workbook
@@ -26,8 +53,15 @@ from converter import build_workbook_per_club
 
 # Application-wide constants and theme configuration
 APP_FOOTER_TEXT = "© 2026 TrackMan Converter by Tom McIntyre and Brian McIntyre. All rights reserved."
-TRACKMAN_COLOUR = "#001AFF"  # Primary blue color used throughout the UI
-DARK_BG = "#FFFFFF"  # Main background color for the application (white)
+TRACKMAN_COLOUR = "#2563EB"   # Modern blue – primary action colour
+HEADER_BG    = "#1A1F3A"   # Deep navy – header background
+DARK_BG      = "#F4F6F9"   # Off-white – main window background
+SUBTLE_BTN   = "#2D3561"   # Muted navy – secondary/utility buttons in header
+SUBTLE_HOVER = "#3D4571"   # Lighter navy – hover for subtle buttons
+ACCENT_HOVER = "#1D4ED8"   # Darker blue – hover for primary action buttons
+TEXT_PRIMARY = "#1A1F3A"   # Dark navy – headings and bold labels
+TEXT_BODY    = "#374151"   # Dark grey – regular body text
+TEXT_MUTED   = "#6B7280"   # Medium grey – secondary / loading text
 
 # NOTE: The modal overlay window was removed. A small inline spinner
 # is displayed inside the main window during long-running operations.
@@ -105,7 +139,7 @@ class TrackmanApp(ctk.CTk):
         self.content_frame = None  # Current content display frame
 
         # Create header with TrackMan branding (persistent across all views)
-        header = ctk.CTkFrame(self, fg_color=TRACKMAN_COLOUR, corner_radius=0, height=30)
+        header = ctk.CTkFrame(self, fg_color=HEADER_BG, corner_radius=0, height=30)
         header.pack(fill="x")
         ctk.CTkLabel(
             header,
@@ -120,7 +154,7 @@ class TrackmanApp(ctk.CTk):
         self.spinner_label.pack(side="right", padx=12, pady=4)
 
         # Clear clubs cache button (moved to left side of header)
-        clear_btn = ctk.CTkButton(header, text="Clear Clubs Cache", width=140, height=26, fg_color="#FFFFFF", text_color="black", hover_color="#EEEEEE", command=self.clear_clubs_cache)
+        clear_btn = ctk.CTkButton(header, text="Clear Clubs Cache", width=140, height=26, fg_color=SUBTLE_BTN, text_color="white", hover_color=SUBTLE_HOVER, command=self.clear_clubs_cache)
         clear_btn.pack(side="left", padx=(12, 6), pady=6)
 
         # Create main content container that will hold different views
@@ -132,14 +166,14 @@ class TrackmanApp(ctk.CTk):
             self,
             text=APP_FOOTER_TEXT,
             font=("Segoe UI", 11, "italic"),
-            text_color="#333333",
+            text_color=TEXT_MUTED,
         ).pack(side="bottom", pady=8)
 
         # Center the window on screen
         self.update_idletasks()
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        window_width = 800
+        window_width = 1000
         window_height = 900
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
@@ -156,7 +190,9 @@ class TrackmanApp(ctk.CTk):
             reports: List of report dictionaries with 'id' and 'time' keys
             token: Authentication token for downloading reports from TrackMan API
         """
+        log.info(f"show_report_selector: called with {len(reports)} report(s)")
         self._clear_content()
+        log.info("show_report_selector: content cleared")
         self.token = token
         
         # Create container for the selector
@@ -169,22 +205,27 @@ class TrackmanApp(ctk.CTk):
         scroll_area.pack(fill="both", expand=True, padx=20, pady=10)
 
         container = ctk.CTkFrame(scroll_area, fg_color=DARK_BG)
-        container.pack(anchor="center", expand=True)
+        container.pack(anchor="n", fill="x")
 
         # Sort reports by date (newest first)
+        log.info("show_report_selector: sorting reports")
         reports.sort(key=lambda r: r["time"], reverse=True)
+        log.info("show_report_selector: building header row")
 
-        # Configure container as a simple rows table: Date | Report | Clubs | Action
-        container.grid_columnconfigure(0, weight=0)
-        container.grid_columnconfigure(1, weight=1)
+        # Configure container as a simple rows table: # | Date | Report | Clubs | Action
+        container.grid_columnconfigure(0, weight=0, minsize=40)
+        container.grid_columnconfigure(1, weight=0)
         container.grid_columnconfigure(2, weight=1)
-        container.grid_columnconfigure(3, weight=0)
+        container.grid_columnconfigure(3, weight=1)
+        container.grid_columnconfigure(4, weight=0)
 
         # Header row
-        ctk.CTkLabel(container, text="Date", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=0, column=0, padx=28, pady=4, sticky="w")
-        ctk.CTkLabel(container, text="Report", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=0, column=1, padx=28, pady=4, sticky="w")
-        ctk.CTkLabel(container, text="Clubs", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=0, column=2, padx=48, pady=4, sticky="w")
-        ctk.CTkLabel(container, text="Action", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=0, column=3, padx=28, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="#", font=("Segoe UI", 16, "bold"), text_color=TEXT_MUTED).grid(row=0, column=0, padx=(8, 4), pady=4, sticky="e")
+        ctk.CTkLabel(container, text="Date", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=1, padx=28, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Report", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=2, padx=28, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Clubs", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=3, padx=48, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Action", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=4, padx=28, pady=4, sticky="w")
+        log.info("show_report_selector: header row built, starting report rows")
 
         # Rows
         for i, r in enumerate(reports, start=1):
@@ -193,19 +234,22 @@ class TrackmanApp(ctk.CTk):
             day = date.strftime("%d")
             year = date.strftime("%Y")
 
+            # Sequence number cell
+            ctk.CTkLabel(container, text=str(i), font=("Segoe UI", 13), text_color=TEXT_MUTED).grid(row=i, column=0, padx=(8, 4), pady=6, sticky="e")
+
             # Date cell (bigger font)
-            ctk.CTkLabel(container, text=f"{month} {day} {year}", font=("Segoe UI", 16, "bold"), text_color="black").grid(row=i, column=0, padx=8, pady=6, sticky="w")
+            ctk.CTkLabel(container, text=f"{month} {day} {year}", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=i, column=1, padx=8, pady=6, sticky="w")
 
             # Report description cell
-            ctk.CTkLabel(container, text="Multi Group Report", font=("Segoe UI", 12), text_color="#333333").grid(row=i, column=1, padx=8, pady=6, sticky="w")
+            ctk.CTkLabel(container, text="Multi Group Report", font=("Segoe UI", 12), text_color=TEXT_BODY).grid(row=i, column=2, padx=8, pady=6, sticky="w")
 
             # Clubs placeholder (will be filled asynchronously)
-            clubs_lbl = ctk.CTkLabel(container, text="Loading...", font=("Segoe UI", 11), text_color="#333333")
-            clubs_lbl.grid(row=i, column=2, padx=8, pady=6, sticky="w")
+            clubs_lbl = ctk.CTkLabel(container, text="Loading...", font=("Segoe UI", 11), text_color=TEXT_MUTED)
+            clubs_lbl.grid(row=i, column=3, padx=8, pady=6, sticky="w")
 
             # Action button
-            btn = ctk.CTkButton(container, text="Select", fg_color=TRACKMAN_COLOUR, hover_color="#FF8533", text_color="white", width=90, height=28, font=("Segoe UI", 11, "bold"), command=lambda rep=r: self.on_report_selected(rep))
-            btn.grid(row=i, column=3, padx=8, pady=4)
+            btn = ctk.CTkButton(container, text="Select", fg_color=TRACKMAN_COLOUR, hover_color=ACCENT_HOVER, text_color="white", width=90, height=28, font=("Segoe UI", 11, "bold"), command=lambda rep=r: self.on_report_selected(rep))
+            btn.grid(row=i, column=4, padx=8, pady=4)
 
             # Start background thread to fetch clubs for this report (uses cache)
             def fetch_and_update(rep_id, label):
@@ -219,6 +263,10 @@ class TrackmanApp(ctk.CTk):
 
             threading.Thread(target=fetch_and_update, args=(r["id"], clubs_lbl), daemon=True).start()
 
+        log.info(f"show_report_selector: all {len(reports)} row(s) rendered successfully")
+        # Force tkinter to recalculate layout and update the scrollable canvas scroll region
+        self.update_idletasks()
+
 
     def on_report_selected(self, report):
         """Handle report selection: run download+convert in a background thread.
@@ -231,12 +279,23 @@ class TrackmanApp(ctk.CTk):
                 # update spinner text while converting
                 self.after(0, lambda: self.show_overlay(" Converting to formatted Excel..."))
 
+                # Extract clubs from the downloaded JSON for the filename
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        report_data = json.load(f)
+                    clubs = trackman_api.extract_clubs_from_report_json(report_data)
+                    clubs_str = "_".join(clubs) if clubs else ""
+                except Exception:
+                    clubs_str = ""
+
                 out_dir = Path(r"C:\Trackman\Data")
                 out_dir.mkdir(parents=True, exist_ok=True)
-                default_name = f"{report['time'].strftime('%Y_%m_%d')}.xlsx"
+                date_str = report['time'].strftime('%Y_%m_%d')
+                default_name = f"{date_str}_{clubs_str}.xlsx" if clubs_str else f"{date_str}.xlsx"
                 out_path = out_dir / default_name
 
                 result = convert_json_to_excel(json_path, str(out_path))
+                log.info(f"on_report_selected: conversion complete -> {result}")
 
                 def on_success():
                     self.hide_overlay()
@@ -246,9 +305,12 @@ class TrackmanApp(ctk.CTk):
 
                 self.after(0, on_success)
             except Exception as e:
+                # Capture message NOW — Python 3 deletes 'e' after the except block.
+                err_msg = str(e)
+                log.exception("on_report_selected worker failed")
                 def on_error():
                     self.hide_overlay()
-                    messagebox.showerror("Error", str(e))
+                    messagebox.showerror("Error", err_msg)
                 self.after(0, on_error)
 
         # start background worker and show spinner
@@ -311,6 +373,55 @@ class TrackmanApp(ctk.CTk):
         self._spinner_dots += 1
         self._spinner_after_id = self.after(300, self._spinner_loop)
 
+    def _ask_for_token(self, on_success):
+        """Show a dialog asking the user to paste their TrackMan bearer token.
+
+        `on_success(token)` is called on the main thread once a valid token is
+        saved, allowing the caller to resume whatever flow needs authentication.
+        """
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("TrackMan Login Required")
+        dialog.geometry("560x320")
+        dialog.resizable(False, False)
+        dialog.grab_set()  # modal
+
+        ctk.CTkLabel(
+            dialog,
+            text="Could not read your TrackMan login from Chrome cookies.\n\n"
+                 "To get your Bearer token:\n"
+                 "  1. Open Chrome and go to a TrackMan report page.\n"
+                 "  2. Press F12 → Application → Cookies → trackmangolf.com\n"
+                 "  3. Find 'appSession' and copy its Value.",
+            font=("Segoe UI", 12),
+            justify="left",
+            wraplength=520,
+        ).pack(padx=20, pady=(20, 10), anchor="w")
+
+        entry = ctk.CTkEntry(dialog, width=520, placeholder_text="Paste token here…")
+        entry.pack(padx=20, pady=(0, 12))
+
+        status_lbl = ctk.CTkLabel(dialog, text="", font=("Segoe UI", 11), text_color="#e05555")
+        status_lbl.pack()
+
+        def _on_submit():
+            token = entry.get().strip()
+            if not token:
+                status_lbl.configure(text="Token cannot be empty.")
+                return
+            if not trackman_auth._is_valid_token(token):
+                status_lbl.configure(text="Token contains invalid characters. Please re-copy from Chrome.")
+                return
+            trackman_auth.save_token(token)
+            log.info("_ask_for_token: token manually saved, len=%d", len(token))
+            dialog.destroy()
+            on_success(token)
+
+        ctk.CTkButton(dialog, text="Save & Continue", command=_on_submit,
+                      fg_color=TRACKMAN_COLOUR, hover_color=ACCENT_HOVER,
+                      text_color="white").pack(pady=(4, 0))
+
+        entry.bind("<Return>", lambda _e: _on_submit())
+
     def handle_cloud(self, fetch_metadata: bool = True):
         """Fetch TrackMan reports from Chrome history and display report selector.
         
@@ -327,13 +438,23 @@ class TrackmanApp(ctk.CTk):
             try:
                 from trackman_api import get_all_report_ids_from_chrome, fetch_report_metadata_batch
 
+                log.info("handle_cloud: getting token")
                 token = trackman_auth.get_saved_token() or trackman_auth.login_via_browser()
                 if not token:
-                    raise Exception("Could not retrieve TrackMan token.")
+                    log.warning("handle_cloud: no token available, showing manual input dialog")
+                    # Schedule the token dialog on the main thread; resume handle_cloud after success.
+                    def _resume_after_token(saved_token):
+                        self.token = saved_token
+                        self.hide_overlay()
+                        self.handle_cloud(fetch_metadata=fetch_metadata)
+                    self.after(0, lambda: [self.hide_overlay(), self._ask_for_token(_resume_after_token)])
+                    return
+                log.info("handle_cloud: token obtained")
 
                 # search chrome history
                 self.after(0, lambda: self.show_overlay(" Searching Chrome history for TrackMan reports..."))
-                raw_reports = get_all_report_ids_from_chrome(limit=50)
+                raw_reports = get_all_report_ids_from_chrome(limit=200)
+                log.info(f"handle_cloud: found {len(raw_reports) if raw_reports else 0} raw report(s) in Chrome history")
 
                 if not raw_reports:
                     def no_reports():
@@ -354,12 +475,14 @@ class TrackmanApp(ctk.CTk):
                     if rid and rid not in seen:
                         seen.add(rid)
                         unique_reports.append(r)
+                log.info(f"handle_cloud: {len(unique_reports)} unique report(s) after dedup")
 
                 # fetch metadata (optional)
                 if fetch_metadata:
                     self.after(0, lambda: self.show_overlay(" Getting upload dates from TrackMan..."))
                     report_ids = [r["id"] for r in unique_reports]
                     metadata_list = fetch_report_metadata_batch(token, report_ids, max_workers=5)
+                    log.info(f"handle_cloud: metadata batch returned {sum(1 for m in metadata_list if m)} non-None result(s)")
 
                     enriched = []
                     for r, meta in zip(unique_reports, metadata_list):
@@ -367,18 +490,31 @@ class TrackmanApp(ctk.CTk):
                             try:
                                 meta["time"] = datetime.fromisoformat(meta["created"].replace("Z", "+00:00"))
                             except Exception:
-                                meta["time"] = datetime.utcnow()
+                                meta["time"] = r.get("time", datetime.utcnow())
                             enriched.append(meta)
                         else:
-                            enriched.append({"id": r["id"], "time": datetime.utcnow()})
+                            # Metadata fetch failed — fall back to Chrome history visit time
+                            enriched.append({"id": r["id"], "time": r.get("time", datetime.utcnow())})
                 else:
                     # Skip fetching metadata; provide fallback timestamps so UI can display
                     enriched = [{"id": r["id"], "time": datetime.utcnow()} for r in unique_reports]
 
+                log.info(f"handle_cloud: showing selector with {len(enriched)} report(s)")
                 # show selector on main thread
-                self.after(0, lambda: [self.hide_overlay(), self.show_report_selector(enriched, token)])
+                def _show_selector():
+                    try:
+                        self.hide_overlay()
+                        self.show_report_selector(enriched, token)
+                    except Exception as _e:
+                        log.exception("show_report_selector raised an exception")
+                        messagebox.showerror("Error", str(_e))
+                self.after(0, _show_selector)
             except Exception as e:
-                self.after(0, lambda: [self.hide_overlay(), messagebox.showerror("Error", str(e))])
+                # Capture message NOW — Python 3 deletes 'e' after the except block,
+                # so referencing it inside a lambda scheduled via after() would raise NameError.
+                err_msg = str(e)
+                log.exception("handle_cloud worker failed")
+                self.after(0, lambda: [self.hide_overlay(), messagebox.showerror("Error", err_msg)])
 
         # start worker thread and show initial spinner
         self.show_overlay(" Checking TrackMan login...")

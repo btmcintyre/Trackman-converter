@@ -1,0 +1,23 @@
+# PyInstaller build output
+dist/
+build/
+*.spec.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+
+# App runtime files (may contain secrets)
+trackman_token.txt
+trackman_full_report.json
+clubs_cache.json
+
+# Logs
+*.log
+
+# Editor
+.vscode/
+*.swp

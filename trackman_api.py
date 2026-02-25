@@ -2,6 +2,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import json
+import logging
 import time
 from pathlib import Path
 import sqlite3
@@ -11,6 +12,8 @@ import tempfile
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import asyncio
+
+log = logging.getLogger(__name__)
 
 try:
     import aiohttp
@@ -142,7 +145,7 @@ def get_latest_report_id_from_chrome() -> str:
             SELECT url, last_visit_time FROM urls
             WHERE url LIKE '%trackmangolf.com%'
             ORDER BY last_visit_time DESC
-            LIMIT 50
+            LIMIT 200
             """
         )
         rows = cursor.fetchall()
@@ -171,7 +174,7 @@ def get_latest_report_id_from_chrome() -> str:
 
 
 
-def get_all_report_ids_from_chrome(limit=15):
+def get_all_report_ids_from_chrome(limit=200):
     """
     Scans Chrome's history for all TrackMan report URLs
     and returns a list of dicts: [{'id': 'uuid', 'url': '...', 'time': datetime}, ...]
@@ -373,6 +376,7 @@ def fetch_report_clubs(token: str, report_id: str) -> list:
     try:
         resp = _SESSION.post(url, headers=headers, json=payload, timeout=15)
         if resp.status_code != 200:
+            log.warning("fetch_report_clubs: HTTP %s for report %s", resp.status_code, report_id)
             return []
         data = resp.json()
         clubs = extract_clubs_from_report_json(data)
@@ -383,4 +387,5 @@ def fetch_report_clubs(token: str, report_id: str) -> list:
             pass
         return clubs
     except Exception:
+        log.exception("fetch_report_clubs failed for report %s", report_id)
         return []
