@@ -137,6 +137,7 @@ class TrackmanApp(ctk.CTk):
         self.overlay = None  # Loading overlay reference
         self.token = None  # Store token for report selection
         self.content_frame = None  # Current content display frame
+        self._cached_reports = None  # Enriched report list from last full metadata fetch
 
         # Create header with TrackMan branding (persistent across all views)
         header = ctk.CTkFrame(self, fg_color=HEADER_BG, corner_radius=0, height=30)
@@ -451,6 +452,16 @@ class TrackmanApp(ctk.CTk):
                     return
                 log.info("handle_cloud: token obtained")
 
+                # If skipping metadata and we have a cached list, go straight to the selector
+                if not fetch_metadata and self._cached_reports is not None:
+                    log.info("handle_cloud: using cached report list (%d reports)", len(self._cached_reports))
+                    cached = self._cached_reports
+                    def _show_cached():
+                        self.hide_overlay()
+                        self.show_report_selector(cached, token)
+                    self.after(0, _show_cached)
+                    return
+
                 # search chrome history
                 self.after(0, lambda: self.show_overlay(" Searching Chrome history for TrackMan reports..."))
                 raw_reports = get_all_report_ids_from_chrome(limit=200)
@@ -495,9 +506,10 @@ class TrackmanApp(ctk.CTk):
                         else:
                             # Metadata fetch failed — fall back to Chrome history visit time
                             enriched.append({"id": r["id"], "time": r.get("time", datetime.utcnow())})
+                    self._cached_reports = enriched  # cache for subsequent refreshes
                 else:
-                    # Skip fetching metadata; provide fallback timestamps so UI can display
-                    enriched = [{"id": r["id"], "time": datetime.utcnow()} for r in unique_reports]
+                    # Skip fetching metadata; use Chrome history visit time for each report
+                    enriched = [{"id": r["id"], "time": r.get("time", datetime.utcnow())} for r in unique_reports]
 
                 log.info(f"handle_cloud: showing selector with {len(enriched)} report(s)")
                 # show selector on main thread
