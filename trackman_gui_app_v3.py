@@ -49,7 +49,7 @@ from openpyxl.utils import get_column_letter
 import trackman_auth
 import trackman_api
 from trackman_api import download_report, get_latest_report_id_from_chrome, fetch_report_clubs
-from converter import build_workbook_per_club
+from converter import build_workbook_per_club, append_to_master_workbook, split_by_player, _safe_filename_part
 
 # Application-wide constants and theme configuration
 APP_FOOTER_TEXT = "© 2026 TrackMan Converter by Tom McIntyre and Brian McIntyre. All rights reserved."
@@ -280,27 +280,58 @@ class TrackmanApp(ctk.CTk):
                 # update spinner text while converting
                 self.after(0, lambda: self.show_overlay(" Converting to formatted Excel..."))
 
-                # Extract clubs from the downloaded JSON for the filename
-                try:
-                    with open(json_path, "r", encoding="utf-8") as f:
-                        report_data = json.load(f)
-                    clubs = trackman_api.extract_clubs_from_report_json(report_data)
-                    clubs_str = "_".join(clubs) if clubs else ""
-                except Exception:
-                    clubs_str = ""
+                # Load downloaded JSON once
+                with open(json_path, "r", encoding="utf-8") as f:
+                    report_data = json.load(f)
 
                 out_dir = Path(r"C:\Trackman\Data")
                 out_dir.mkdir(parents=True, exist_ok=True)
                 date_str = report['time'].strftime('%Y_%m_%d')
-                default_name = f"{date_str}_{clubs_str}.xlsx" if clubs_str else f"{date_str}.xlsx"
-                out_path = out_dir / default_name
 
-                result = convert_json_to_excel(json_path, str(out_path))
-                log.info(f"on_report_selected: conversion complete -> {result}")
+                # Split by player and produce one session file + one master per player
+                players = split_by_player(report_data)
+                session_paths: list[Path] = []
+                master_paths: list[Path] = []
+
+                for player_name, player_data in players.items():
+                    safe_player = _safe_filename_part(player_name)
+                    try:
+                        clubs = trackman_api.extract_clubs_from_report_json(player_data)
+                        clubs_str = "_".join(clubs) if clubs else ""
+                    except Exception:
+                        clubs_str = ""
+
+                    session_name = (
+                        f"{date_str}_{safe_player}_{clubs_str}.xlsx" if clubs_str
+                        else f"{date_str}_{safe_player}.xlsx"
+                    )
+                    out_path = out_dir / session_name
+
+                    self.after(0, lambda pn=player_name: self.show_overlay(f" Converting {pn}..."))
+                    wb = build_workbook_per_club(player_data)
+                    wb.save(str(out_path))
+                    session_paths.append(out_path)
+                    log.info(f"on_report_selected: session saved -> {out_path}")
+
+                    master_path = out_dir / f"Trackman_Master_{safe_player}.xlsx"
+                    self.after(0, lambda pn=player_name: self.show_overlay(f" Updating master for {pn}..."))
+                    try:
+                        append_to_master_workbook(player_data, master_path)
+                        master_paths.append(master_path)
+                        log.info(f"on_report_selected: master updated -> {master_path}")
+                    except Exception as _me:
+                        log.warning(f"on_report_selected: master update failed for {player_name}: {_me}")
+
+                _session_paths = session_paths
+                _master_paths = master_paths
 
                 def on_success():
                     self.hide_overlay()
-                    messagebox.showinfo("Success", f" Downloaded and converted!\nSaved as:\n{result}")
+                    msg = "Downloaded and converted!"
+                    msg += "\n\nSession files:\n" + "\n".join(str(p) for p in _session_paths)
+                    if _master_paths:
+                        msg += "\n\nMaster workbooks updated:\n" + "\n".join(str(p) for p in _master_paths)
+                    messagebox.showinfo("Success", msg)
                     # refresh report list but skip re-fetching metadata (it's unchanged)
                     self.handle_cloud(fetch_metadata=False)
 

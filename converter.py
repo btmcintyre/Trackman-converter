@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
@@ -145,6 +145,9 @@ def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
     last_col_letter = get_column_letter(n_cols)
     ws.auto_filter.ref = f"A{header_row_idx}:{last_col_letter}{data_end}"
 
+    # Time column (A) — 135 px ÷ 7 px/char ≈ 19.3 character units
+    ws.column_dimensions["A"].width = 19.3
+
     summary_labels = ["Pos Av", "Neg Av", "1 Av", "Spread", "% Pos", "% Neg"]
     summary_start = data_end + 2
 
@@ -196,7 +199,8 @@ def append_best_swings(ws, df: pd.DataFrame):
 
     df_num = df.copy()
     for col in df_num.columns:
-        df_num[col] = pd.to_numeric(df_num[col], errors="coerce")
+        if col != "Time":
+            df_num[col] = pd.to_numeric(df_num[col], errors="coerce")
 
     def qualifies(row):
         try:
@@ -261,16 +265,167 @@ def append_best_swings(ws, df: pd.DataFrame):
         ws.cell(row=best_excel_row, column=col_idx).border = blue_border
 
 
+# Labels written by style_and_finalize_sheet / append_best_swings that mark
+# the end of real data rows in an existing master sheet.
+_MASTER_END_LABELS = {
+    "Pos Av", "Neg Av", "1 Av", "Spread", "% Pos", "% Neg", "Best Swings"
+}
+
+
+def append_to_master_workbook(data: dict, master_path: Path) -> None:
+    """Append session stroke data into the master workbook at *master_path*.
+
+    Each club (by name only, tags ignored) gets its own sheet.  If the file
+    does not exist it is created from scratch.  When a club sheet already
+    exists the existing data rows are read back, the new rows are appended
+    below them, and the whole sheet is rebuilt so the summary statistics and
+    Best-Swings section reflect the full accumulated dataset.
+    """
+    if master_path.exists():
+        wb = load_workbook(str(master_path))
+    else:
+        wb = Workbook()
+        wb.remove(wb.active)
+
+    stroke_groups = data.get("StrokeGroups", []) or []
+
+    for g in stroke_groups:
+        club = str(g.get("Club", "Unknown Club"))
+        sheet_name = club[:31]
+
+        # Collect new rows from this session group.
+        new_rows = []
+        for s in g.get("Strokes", []) or []:
+            m = s.get("Measurement")
+            if isinstance(m, dict):
+                new_rows.append(convert_measurement_to_row(m))
+
+        if not new_rows:
+            continue
+
+        # Read back existing data rows (skip header, stop at summary label or
+        # blank separator row).
+        existing_rows = []
+        existing_times: set[str] = set()
+        sheet_idx = None
+        if sheet_name in wb.sheetnames:
+            sheet_idx = wb.sheetnames.index(sheet_name)
+            ws_old = wb[sheet_name]
+            for row in ws_old.iter_rows(min_row=2, values_only=True):
+                first = row[0] if row else None
+                if first is None or first in _MASTER_END_LABELS:
+                    break
+                row_dict = {col: (val if val is not None else "") for col, val in zip(COLUMNS, row)}
+                existing_rows.append(row_dict)
+                # Normalise the Time value to a plain string for dedup comparisons.
+                # openpyxl returns stored datetimes as Python datetime objects.
+                t = row_dict.get("Time", "")
+                if t:
+                    t_str = t.strftime("%Y-%m-%d %H:%M:%S") if hasattr(t, "strftime") else str(t)
+                    existing_times.add(t_str)
+            del wb[sheet_name]
+
+        # Filter new rows – skip any stroke whose Time already appears in the master.
+        new_rows = [row for row in new_rows if row.get("Time", "") not in existing_times]
+        if not new_rows:
+            # Nothing genuinely new for this club; restore sheet as-is.
+            if existing_rows:
+                ws = wb.create_sheet(title=sheet_name, index=sheet_idx)
+                df_restore = pd.DataFrame(existing_rows, columns=COLUMNS)
+                for col in df_restore.columns:
+                    if col == "Time":
+                        df_restore[col] = pd.to_datetime(df_restore[col], errors="coerce")
+                    else:
+                        df_restore[col] = pd.to_numeric(df_restore[col], errors="coerce")
+                for r in dataframe_to_rows(df_restore, index=False, header=True):
+                    ws.append(r)
+                style_and_finalize_sheet(ws, 1, len(COLUMNS), len(df_restore))
+                append_best_swings(ws, df_restore)
+            continue
+
+        # Rebuild sheet at the same position (or appended when new).
+        ws = wb.create_sheet(title=sheet_name, index=sheet_idx)
+
+        all_rows = existing_rows + new_rows
+        df = pd.DataFrame(all_rows, columns=COLUMNS)
+        for col in df.columns:
+            if col == "Time":
+                df[col] = pd.to_datetime(df[col], errors="coerce")
+            else:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        for r in dataframe_to_rows(df, index=False, header=True):
+            ws.append(r)
+
+        style_and_finalize_sheet(ws, 1, len(COLUMNS), len(df))
+        append_best_swings(ws, df)
+
+    wb.save(str(master_path))
+
+
+def split_by_player(data: dict) -> dict[str, dict]:
+    """Partition a report's StrokeGroups by player.
+
+    Returns a dict mapping each player's display name to a copy of *data*
+    containing only that player's StrokeGroups.  When no Player field is
+    present on any group the whole report is returned under the key
+    "Unknown Player".
+    """
+    groups_by_player: dict[str, list] = {}
+    for g in data.get("StrokeGroups", []) or []:
+        player_info = g.get("Player") or {}
+        name = (player_info.get("Name") or "").strip() or "Unknown Player"
+        groups_by_player.setdefault(name, []).append(g)
+
+    result: dict[str, dict] = {}
+    for name, groups in groups_by_player.items():
+        player_data = dict(data)          # shallow copy preserves top-level keys
+        player_data["StrokeGroups"] = groups
+        result[name] = player_data
+    return result
+
+
+def _safe_filename_part(name: str) -> str:
+    """Convert a player name to a safe filename fragment (no special chars)."""
+    import re as _re
+    return _re.sub(r'[^A-Za-z0-9_-]+', '_', name).strip('_')
+
+
 def build_workbook_per_club(data: dict) -> Workbook:
     wb = Workbook()
     wb.remove(wb.active)
 
     stroke_groups = data.get("StrokeGroups", []) or []
     all_rows = []
+    used_titles: dict[str, int] = {}
 
     for g in stroke_groups:
         club = str(g.get("Club", "Unknown Club"))
-        ws = wb.create_sheet(title=club[:31])
+
+        # Build tag suffix from the StrokeGroup's Tags array.
+        # Tags may be plain strings or objects with a "Name" key.
+        raw_tags = g.get("Tags") or []
+        tag_strs = []
+        for t in raw_tags:
+            if isinstance(t, str):
+                tag_strs.append(t)
+            elif isinstance(t, dict):
+                label = t.get("Name") or t.get("Label") or ""
+                if label:
+                    tag_strs.append(label)
+        base_title = f"{club} - {', '.join(tag_strs)}" if tag_strs else club
+
+        # Excel sheet names are limited to 31 characters; deduplicate within workbook.
+        base_title = base_title[:31]
+        if base_title in used_titles:
+            used_titles[base_title] += 1
+            suffix = f" ({used_titles[base_title]})"
+            title = base_title[: 31 - len(suffix)] + suffix
+        else:
+            used_titles[base_title] = 1
+            title = base_title
+
+        ws = wb.create_sheet(title=title)
 
         rows = []
         for s in g.get("Strokes", []) or []:
