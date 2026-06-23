@@ -115,7 +115,6 @@ def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
     data_end = header_row_idx + n_rows
 
     for r in range(data_start, data_end + 1):
-        fill = ALT_FILL if (r - data_start) % 2 == 0 else None
         for c in range(1, n_cols + 1):
             cell = ws.cell(row=r, column=c)
             val = cell.value
@@ -137,9 +136,6 @@ def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
                 cell.alignment = Alignment(horizontal="right", vertical="center")
             else:
                 cell.alignment = Alignment(horizontal="left", vertical="center")
-
-            if fill:
-                cell.fill = ALT_FILL
 
     ws.freeze_panes = f"A{header_row_idx + 1}"
     last_col_letter = get_column_letter(n_cols)
@@ -414,6 +410,11 @@ def build_workbook_per_club(data: dict) -> Workbook:
                 if label:
                     tag_strs.append(label)
         base_title = f"{club} - {', '.join(tag_strs)}" if tag_strs else club
+
+        # Excel sheet names cannot contain: / \ * ? [ ] :
+        for _ch in r'/\*?[]':
+            base_title = base_title.replace(_ch, "-")
+        base_title = base_title.replace(":", "-")
 
         # Excel sheet names are limited to 31 characters; deduplicate within workbook.
         base_title = base_title[:31]

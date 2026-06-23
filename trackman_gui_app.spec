@@ -1,32 +1,36 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+import certifi
 
 a = Analysis(
-    ['trackman_gui_app.py'],
+    ['trackman_gui_app_v3.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=[
+        (certifi.where(), 'certifi'),  # SSL CA bundle for requests/aiohttp in frozen build
+    ],
+    hiddenimports=['customtkinter', 'openpyxl', 'pandas', 'PIL', 'PIL._tkinter_finder', 'certifi',
+                   'cryptography', 'cryptography.hazmat.primitives.ciphers.aead'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'matplotlib', 'scipy', 'IPython', 'notebook', 'pytest',
+        'lib2to3', 'pydoc', 'doctest',
+    ],
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
 pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='trackman_gui_app',
+    [],          # binaries moved to COLLECT – no temp extraction on launch
+    name='TrackmanConverter',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,   # disabled: saves decompression time at startup
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -35,4 +39,14 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='TrackmanConverter',
 )
