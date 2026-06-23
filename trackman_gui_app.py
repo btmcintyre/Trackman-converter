@@ -52,6 +52,7 @@ from trackman_api import download_report, get_latest_report_id_from_chrome, fetc
 from converter import build_workbook_per_club, append_to_master_workbook, split_by_player, _safe_filename_part
 
 # Application-wide constants and theme configuration
+APP_VERSION = "3.0.1"
 APP_FOOTER_TEXT = "© 2026 TrackMan Converter by Tom McIntyre and Brian McIntyre. All rights reserved."
 TRACKMAN_COLOUR = "#2563EB"   # Modern blue – primary action colour
 HEADER_BG    = "#1A1F3A"   # Deep navy – header background
@@ -142,12 +143,20 @@ class TrackmanApp(ctk.CTk):
         # Create header with TrackMan branding (persistent across all views)
         header = ctk.CTkFrame(self, fg_color=HEADER_BG, corner_radius=0, height=30)
         header.pack(fill="x")
+        title_frame = ctk.CTkFrame(header, fg_color=HEADER_BG)
+        title_frame.pack(pady=8)
         ctk.CTkLabel(
-            header,
+            title_frame,
             text="TrackMan Report Converter",
             font=("Segoe UI", 28, "bold"),
             text_color="white",
-        ).pack(pady=12)
+        ).pack()
+        ctk.CTkLabel(
+            title_frame,
+            text=f"v{APP_VERSION}",
+            font=("Segoe UI", 11),
+            text_color="#94A3B8",
+        ).pack()
 
         # Inline spinner label for long-running tasks (hidden by default)
         self.spinner_label = ctk.CTkLabel(header, text="", font=("Segoe UI", 12), text_color="white")

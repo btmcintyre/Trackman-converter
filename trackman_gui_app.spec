@@ -2,7 +2,7 @@
 import certifi
 
 a = Analysis(
-    ['trackman_gui_app_v3.py'],
+    ['trackman_gui_app.py'],
     pathex=[],
     binaries=[],
     datas=[
