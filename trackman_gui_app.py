@@ -48,7 +48,7 @@ from openpyxl.utils import get_column_letter
 # Project-specific modules
 import trackman_auth
 import trackman_api
-from trackman_api import download_report, get_latest_report_id_from_chrome, fetch_report_clubs
+from trackman_api import download_report, get_latest_report_id_from_chrome, fetch_report_summary
 from converter import build_workbook_per_club, append_to_master_workbook, split_by_player, _safe_filename_part
 
 # Application-wide constants and theme configuration
@@ -222,19 +222,21 @@ class TrackmanApp(ctk.CTk):
         reports.sort(key=lambda r: r["time"], reverse=True)
         log.info("show_report_selector: building header row")
 
-        # Configure container as a simple rows table: # | Date | Report | Clubs | Action
+        # Configure container as a simple rows table: # | Date | Report | Player | Clubs | Action
         container.grid_columnconfigure(0, weight=0, minsize=40)
         container.grid_columnconfigure(1, weight=0)
-        container.grid_columnconfigure(2, weight=1)
+        container.grid_columnconfigure(2, weight=0)
         container.grid_columnconfigure(3, weight=1)
-        container.grid_columnconfigure(4, weight=0)
+        container.grid_columnconfigure(4, weight=1)
+        container.grid_columnconfigure(5, weight=0)
 
         # Header row
         ctk.CTkLabel(container, text="#", font=("Segoe UI", 16, "bold"), text_color=TEXT_MUTED).grid(row=0, column=0, padx=(8, 4), pady=4, sticky="e")
         ctk.CTkLabel(container, text="Date", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=1, padx=28, pady=4, sticky="w")
         ctk.CTkLabel(container, text="Report", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=2, padx=28, pady=4, sticky="w")
-        ctk.CTkLabel(container, text="Clubs", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=3, padx=48, pady=4, sticky="w")
-        ctk.CTkLabel(container, text="Action", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=4, padx=28, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Player", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=3, padx=28, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Clubs", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=4, padx=48, pady=4, sticky="w")
+        ctk.CTkLabel(container, text="Action", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=5, padx=28, pady=4, sticky="w")
         log.info("show_report_selector: header row built, starting report rows")
 
         # Rows
@@ -251,27 +253,39 @@ class TrackmanApp(ctk.CTk):
             ctk.CTkLabel(container, text=f"{month} {day} {year}", font=("Segoe UI", 16, "bold"), text_color=TEXT_PRIMARY).grid(row=i, column=1, padx=8, pady=6, sticky="w")
 
             # Report description cell
-            ctk.CTkLabel(container, text="Multi Group Report", font=("Segoe UI", 12), text_color=TEXT_BODY).grid(row=i, column=2, padx=8, pady=6, sticky="w")
+            report_kind = "Shot Analysis" if r.get("source") == trackman_api.SOURCE_ACTIVITY else "Multi Group Report"
+            ctk.CTkLabel(container, text=report_kind, font=("Segoe UI", 12), text_color=TEXT_BODY).grid(row=i, column=2, padx=8, pady=6, sticky="w")
 
-            # Clubs placeholder (will be filled asynchronously)
+            # Player and clubs placeholders (both filled asynchronously)
+            player_lbl = ctk.CTkLabel(container, text="Loading...", font=("Segoe UI", 12), text_color=TEXT_MUTED)
+            player_lbl.grid(row=i, column=3, padx=8, pady=6, sticky="w")
+
             clubs_lbl = ctk.CTkLabel(container, text="Loading...", font=("Segoe UI", 11), text_color=TEXT_MUTED)
-            clubs_lbl.grid(row=i, column=3, padx=8, pady=6, sticky="w")
+            clubs_lbl.grid(row=i, column=4, padx=8, pady=6, sticky="w")
 
             # Action button
             btn = ctk.CTkButton(container, text="Select", fg_color=TRACKMAN_COLOUR, hover_color=ACCENT_HOVER, text_color="white", width=90, height=28, font=("Segoe UI", 11, "bold"), command=lambda rep=r: self.on_report_selected(rep))
-            btn.grid(row=i, column=4, padx=8, pady=4)
+            btn.grid(row=i, column=5, padx=8, pady=4)
 
-            # Start background thread to fetch clubs for this report (uses cache)
-            def fetch_and_update(rep_id, label):
+            # Start background thread to fetch players/clubs for this report (uses cache)
+            def fetch_and_update(rep_id, rep_source, p_label, c_label):
                 try:
-                    clubs = fetch_report_clubs(self.token, rep_id)
-                    text = ", ".join(clubs) if clubs else "—"
+                    summary = fetch_report_summary(self.token, rep_id, rep_source)
+                    players = summary.get("players") or []
+                    clubs = summary.get("clubs") or []
                 except Exception:
-                    text = "—"
+                    players, clubs = [], []
+                player_text = ", ".join(players) if players else "\u2014"
+                clubs_text = ", ".join(clubs) if clubs else "\u2014"
                 # schedule UI update on main thread
-                self.after(0, lambda: label.configure(text=text))
+                self.after(0, lambda: (p_label.configure(text=player_text, text_color=TEXT_PRIMARY),
+                                       c_label.configure(text=clubs_text)))
 
-            threading.Thread(target=fetch_and_update, args=(r["id"], clubs_lbl), daemon=True).start()
+            threading.Thread(
+                target=fetch_and_update,
+                args=(r["id"], r.get("source") or trackman_api.SOURCE_REPORT, player_lbl, clubs_lbl),
+                daemon=True,
+            ).start()
 
         log.info(f"show_report_selector: all {len(reports)} row(s) rendered successfully")
         # Force tkinter to recalculate layout and update the scrollable canvas scroll region
@@ -285,7 +299,7 @@ class TrackmanApp(ctk.CTk):
         """
         def worker():
             try:
-                json_path = download_report(self.token, report["id"])
+                json_path = download_report(self.token, report["id"], report.get("source") or trackman_api.SOURCE_REPORT)
                 # update spinner text while converting
                 self.after(0, lambda: self.show_overlay(" Converting to formatted Excel..."))
 
@@ -301,6 +315,7 @@ class TrackmanApp(ctk.CTk):
                 players = split_by_player(report_data)
                 session_paths: list[Path] = []
                 master_paths: list[Path] = []
+                empty_players: list[str] = []
 
                 for player_name, player_data in players.items():
                     safe_player = _safe_filename_part(player_name)
@@ -309,6 +324,16 @@ class TrackmanApp(ctk.CTk):
                         clubs_str = "_".join(clubs) if clubs else ""
                     except Exception:
                         clubs_str = ""
+
+                    shot_count = sum(
+                        len(g.get("Strokes") or []) for g in player_data.get("StrokeGroups") or []
+                    )
+                    if not shot_count:
+                        # Writing a placeholder workbook and reporting success hides
+                        # the fact that nothing was converted.
+                        log.warning(f"on_report_selected: no strokes for {player_name}, skipping")
+                        empty_players.append(player_name)
+                        continue
 
                     session_name = (
                         f"{date_str}_{safe_player}_{clubs_str}.xlsx" if clubs_str
@@ -333,13 +358,23 @@ class TrackmanApp(ctk.CTk):
 
                 _session_paths = session_paths
                 _master_paths = master_paths
+                _empty_players = empty_players
 
                 def on_success():
                     self.hide_overlay()
+                    if not _session_paths:
+                        messagebox.showwarning(
+                            "Nothing to Convert",
+                            "This report contains no shots, so no Excel file was created.",
+                        )
+                        self.handle_cloud(fetch_metadata=False)
+                        return
                     msg = "Downloaded and converted!"
                     msg += "\n\nSession files:\n" + "\n".join(str(p) for p in _session_paths)
                     if _master_paths:
                         msg += "\n\nMaster workbooks updated:\n" + "\n".join(str(p) for p in _master_paths)
+                    if _empty_players:
+                        msg += "\n\nSkipped (no shots):\n" + "\n".join(_empty_players)
                     messagebox.showinfo("Success", msg)
                     # refresh report list but skip re-fetching metadata (it's unchanged)
                     self.handle_cloud(fetch_metadata=False)
@@ -477,7 +512,7 @@ class TrackmanApp(ctk.CTk):
         # Run the discovery flow in a background thread so UI remains responsive
         def worker():
             try:
-                from trackman_api import get_all_report_ids_from_chrome, fetch_report_metadata_batch
+                from trackman_api import get_all_report_ids_from_chrome, fetch_report_metadata_batch, prefer_shot_analysis_per_date
 
                 log.info("handle_cloud: getting token")
                 token = trackman_auth.get_saved_token() or trackman_auth.login_via_browser()
@@ -531,8 +566,7 @@ class TrackmanApp(ctk.CTk):
                 # fetch metadata (optional)
                 if fetch_metadata:
                     self.after(0, lambda: self.show_overlay(" Getting upload dates from TrackMan..."))
-                    report_ids = [r["id"] for r in unique_reports]
-                    metadata_list = fetch_report_metadata_batch(token, report_ids, max_workers=5)
+                    metadata_list = fetch_report_metadata_batch(token, unique_reports, max_workers=5)
                     log.info(f"handle_cloud: metadata batch returned {sum(1 for m in metadata_list if m)} non-None result(s)")
 
                     enriched = []
@@ -545,11 +579,13 @@ class TrackmanApp(ctk.CTk):
                             enriched.append(meta)
                         else:
                             # Metadata fetch failed — fall back to Chrome history visit time
-                            enriched.append({"id": r["id"], "time": r.get("time", datetime.utcnow())})
+                            enriched.append({"id": r["id"], "source": r.get("source"), "time": r.get("time", datetime.utcnow())})
+                    enriched = prefer_shot_analysis_per_date(enriched)
                     self._cached_reports = enriched  # cache for subsequent refreshes
                 else:
                     # Skip fetching metadata; use Chrome history visit time for each report
-                    enriched = [{"id": r["id"], "time": r.get("time", datetime.utcnow())} for r in unique_reports]
+                    enriched = [{"id": r["id"], "source": r.get("source"), "time": r.get("time", datetime.utcnow())} for r in unique_reports]
+                    enriched = prefer_shot_analysis_per_date(enriched)
 
                 log.info(f"handle_cloud: showing selector with {len(enriched)} report(s)")
                 # show selector on main thread

@@ -65,9 +65,26 @@ def _conv_0decimal(v, factor=1.0):
     except Exception:
         return ""
 
-def convert_measurement_to_row(m: dict) -> dict:
+def convert_measurement_to_row(m: dict, stroke: dict | None = None) -> dict:
     if not m:
         return {k: "" for k in COLUMNS}
+
+    # Impact height/offset are taken from the stroke's ImpactLocation rather than
+    # the measurement. /getactivityreport quantises the measurement copies of
+    # these two fields to ~0.1mm while /getreport returns full precision, so the
+    # same session would otherwise yield different numbers depending on which
+    # endpoint it came from. ImpactLocation is identical across both.
+    # NOTE: DynamicLie is deliberately NOT taken from here — ImpactLocation.DynamicLie
+    # is the lie deviation (~1.2 deg) whereas Measurement.DynamicLie is the club
+    # lie angle (~69 deg). They are different quantities.
+    impact = (stroke or {}).get("ImpactLocation") or {}
+    impact_height = impact.get("ImpactHeight")
+    if impact_height is None:
+        impact_height = m.get("ImpactHeight")
+    impact_offset = impact.get("ImpactOffset")
+    if impact_offset is None:
+        impact_offset = m.get("ImpactOffset")
+
     return {
         "Time": _fmt_time(m.get("Time", "")),
         "Club Speed (Mph)": _conv_2decimal(m.get("ClubSpeed"), 2.23694),
@@ -75,8 +92,8 @@ def convert_measurement_to_row(m: dict) -> dict:
         "Smash Factor": _conv_2decimal(m.get("SmashFactor")),
         "Carry (Yds)": _conv_2decimal(m.get("Carry"), 1.09361),
         "Total (Yds)": _conv_2decimal(m.get("Total"), 1.09361),
-        "Impact Height (mm)": _conv_2decimal(m.get("ImpactHeight"), 1000),
-        "Impact Offset (mm)": _conv_2decimal(m.get("ImpactOffset"), 1000),
+        "Impact Height (mm)": _conv_2decimal(impact_height, 1000),
+        "Impact Offset (mm)": _conv_2decimal(impact_offset, 1000),
         "Club Path (Deg)": _conv_2decimal(m.get("ClubPath")),
         "Face Angle (Deg)": _conv_2decimal(m.get("FaceAngle")),
         "Face To Path (Deg)": _conv_2decimal(m.get("FaceToPath")),
@@ -101,6 +118,18 @@ def convert_measurement_to_row(m: dict) -> dict:
         "Hang Time (Sec)": _conv_2decimal(m.get("HangTime")),
         "Dynamic Lie (Deg)": _conv_2decimal(m.get("DynamicLie")),
     }
+
+
+def _sorted_by_time(df: pd.DataFrame) -> pd.DataFrame:
+    """Return *df* ordered by shot time.
+
+    The API returns strokes in a different order depending on which endpoint a
+    report came from (``/getreport`` vs ``/getactivityreport``), so the same
+    session could otherwise produce two workbooks with identical data in a
+    different order. Sorting keeps output deterministic and chronological.
+    Rows whose time could not be parsed are kept at the end.
+    """
+    return df.sort_values("Time", kind="stable", na_position="last").reset_index(drop=True)
 
 
 def style_and_finalize_sheet(ws, header_row_idx: int, n_cols: int, n_rows: int):
@@ -294,7 +323,7 @@ def append_to_master_workbook(data: dict, master_path: Path) -> None:
         for s in g.get("Strokes", []) or []:
             m = s.get("Measurement")
             if isinstance(m, dict):
-                new_rows.append(convert_measurement_to_row(m))
+                new_rows.append(convert_measurement_to_row(m, s))
 
         if not new_rows:
             continue
@@ -333,6 +362,7 @@ def append_to_master_workbook(data: dict, master_path: Path) -> None:
                         df_restore[col] = pd.to_datetime(df_restore[col], errors="coerce")
                     else:
                         df_restore[col] = pd.to_numeric(df_restore[col], errors="coerce")
+                df_restore = _sorted_by_time(df_restore)
                 for r in dataframe_to_rows(df_restore, index=False, header=True):
                     ws.append(r)
                 style_and_finalize_sheet(ws, 1, len(COLUMNS), len(df_restore))
@@ -349,6 +379,7 @@ def append_to_master_workbook(data: dict, master_path: Path) -> None:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
             else:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = _sorted_by_time(df)
 
         for r in dataframe_to_rows(df, index=False, header=True):
             ws.append(r)
@@ -432,7 +463,7 @@ def build_workbook_per_club(data: dict) -> Workbook:
         for s in g.get("Strokes", []) or []:
             m = s.get("Measurement")
             if isinstance(m, dict):
-                rows.append(convert_measurement_to_row(m))
+                rows.append(convert_measurement_to_row(m, s))
 
         if not rows:
             continue
@@ -444,6 +475,7 @@ def build_workbook_per_club(data: dict) -> Workbook:
                 df[col] = pd.to_datetime(df[col], format="%Y-%m-%d %H:%M:%S", errors='coerce')
             else:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = _sorted_by_time(df)
 
         for r in dataframe_to_rows(df, index=False, header=True):
             ws.append(r)
@@ -462,6 +494,7 @@ def build_workbook_per_club(data: dict) -> Workbook:
                 df_all[col] = pd.to_datetime(df_all[col], format="%Y-%m-%d %H:%M:%S", errors='coerce')
             else:
                 df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
+        df_all = _sorted_by_time(df_all)
 
         for r in dataframe_to_rows(df_all, index=False, header=True):
             ws_all.append(r)

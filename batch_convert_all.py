@@ -61,6 +61,9 @@ def main():
         get_all_report_ids_from_chrome,
         fetch_report_metadata_batch,
         extract_clubs_from_report_json,
+        prefer_shot_analysis_per_date,
+        SOURCE_ACTIVITY,
+        SOURCE_REPORT,
     )
     from converter import build_workbook_per_club, append_to_master_workbook, split_by_player, _safe_filename_part
 
@@ -100,21 +103,22 @@ def main():
     # Fetch metadata (upload dates) in parallel
     # -----------------------------------------------------------------------
     log.info("Fetching report metadata (upload dates)…")
-    report_ids = [r["id"] for r in unique_reports]
-    metadata_list = fetch_report_metadata_batch(token, report_ids, max_workers=5)
+    metadata_list = fetch_report_metadata_batch(token, unique_reports, max_workers=5)
 
     enriched: list[dict] = []
     for r, meta in zip(unique_reports, metadata_list):
         if meta and meta.get("created"):
             try:
                 created = datetime.fromisoformat(meta["created"].replace("Z", "+00:00"))
-                enriched.append({"id": r["id"], "time": created})
+                enriched.append({"id": r["id"], "source": r.get("source", SOURCE_REPORT), "time": created})
             except Exception:
                 pass
 
     if not enriched:
         log.error("Could not retrieve metadata for any report.  Check your token.")
         sys.exit(1)
+
+    enriched = prefer_shot_analysis_per_date(enriched)
 
     # Sort newest-first so the master workbook gets rows in chronological order
     # when processed oldest-to-newest below.
@@ -131,7 +135,9 @@ def main():
     for i, report in enumerate(enriched, start=1):
         date_str = report["time"].strftime("%Y_%m_%d")
         report_id = report["id"]
-        log.info(f"[{i}/{len(enriched)}] Report {report_id}  ({date_str})")
+        report_source = report.get("source", SOURCE_REPORT)
+        kind = "shot analysis" if report_source == SOURCE_ACTIVITY else "multi group report"
+        log.info(f"[{i}/{len(enriched)}] {kind} {report_id}  ({date_str})")
 
         # Skip if any session file for this date already exists (covers all players).
         # Master workbooks are named Trackman_Master_*.xlsx so they won't match the
@@ -146,7 +152,7 @@ def main():
         # Download
         try:
             log.info(f"  Downloading…")
-            json_path = download_report(token, report_id)
+            json_path = download_report(token, report_id, report_source)
         except Exception as e:
             log.warning(f"  Download failed: {e}")
             failed += 1
